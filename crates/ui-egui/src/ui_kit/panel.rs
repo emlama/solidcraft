@@ -362,6 +362,7 @@ pub(crate) struct Window<'a> {
     width: f32,
     body_padding: bool,
     left_slot: bool,
+    resizable: bool,
 }
 
 impl<'a> Window<'a> {
@@ -381,6 +382,7 @@ impl<'a> Window<'a> {
             width: Tokens::get().form_card_width * 1.5,
             body_padding: true,
             left_slot: false,
+            resizable: false,
         }
     }
 
@@ -422,6 +424,12 @@ impl<'a> Window<'a> {
         if cards.is_finite() && cards > 0.0 {
             self.width = Tokens::get().form_card_width * cards.min(16.0);
         }
+        self
+    }
+
+    /// The card can be resized from its edges, starting at its usual width.
+    pub(crate) fn resizable(mut self) -> Self {
+        self.resizable = true;
         self
     }
 
@@ -512,9 +520,9 @@ impl<'a> Window<'a> {
             .id(self.id)
             .title_bar(false)
             .collapsible(false)
-            .resizable(false)
-            .min_width(inner_width)
-            .max_width(inner_width)
+            .resizable(self.resizable)
+            .min_width(if self.resizable { Tokens::get().form_card_width.min(inner_width) } else { inner_width })
+            .max_width(if self.resizable { dimension(ctx.content_rect().width()) } else { inner_width })
             .default_width(inner_width)
             .scroll(false)
             .frame(frame)

@@ -157,6 +157,7 @@ pub const SECTIONS: &[Section] = &[
             "inspect.continuity",
         ],
     },
+    Section { tab: "INSPECT", panel: "FABRICATE", promoted: 3, ids: &["cutlist.parts", "cutlist.layout", "cutlist.stock"] },
     Section { tab: "INSPECT", panel: "HISTORY", promoted: 2, ids: &["timeline.dependents", "document.inspect"] },
     Section {
         tab: "MANAGE",

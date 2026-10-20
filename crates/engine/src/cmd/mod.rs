@@ -29,6 +29,7 @@ mod component;
 mod component_clone;
 mod component_clone_assembly;
 mod construct;
+mod cutlist;
 mod delete;
 mod diagnostics;
 mod edit;
@@ -282,6 +283,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
+    v.extend(cutlist::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());

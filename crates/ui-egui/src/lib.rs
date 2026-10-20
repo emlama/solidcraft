@@ -21,6 +21,7 @@ mod colour_tokens_tests;
 #[cfg(test)]
 mod colour_vision_tests;
 pub mod context_menu;
+pub mod cutlist_ux;
 pub mod control;
 pub mod crash_ui;
 pub mod deferred;
@@ -372,6 +373,8 @@ pub struct SolveApp {
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
+    /// The cut-list prototype windows (#137).
+    pub cutlist: cutlist_ux::State,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -526,6 +529,7 @@ impl SolveApp {
             dialog: None,
             params: None,
             design_properties: None,
+            cutlist: Default::default(),
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -922,6 +926,9 @@ impl SolveApp {
         }
         if id == "assembly.bom" {
             bom_panel::open(self);
+            return;
+        }
+        if cutlist_ux::start(self, id) {
             return;
         }
         if id == "sketch.finish" {
@@ -1620,6 +1627,7 @@ impl SolveApp {
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
+        cutlist_ux::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());

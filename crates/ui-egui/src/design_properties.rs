@@ -143,6 +143,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     rows.push(("Volume", crate::prefs::show_mm(app, number(total, "volume_mm3"), 3)));
     rows.push(("Area", crate::prefs::show_mm(app, number(total, "area_mm2"), 2)));
     let geometry = if total.get("center_of_mass").is_some() { Some(total) } else { bodies.first().filter(|_| bodies.len() == 1) };
+    let mut stock = None;
     if let Some(b) = geometry {
         let unit = crate::prefs::unit_scale(&app.session.doc.units).1;
         if let Some(c) = b["center_of_mass"].as_array() {
@@ -154,15 +155,31 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
             let d: Vec<String> =
                 a.iter().zip(z).map(|(a, z)| crate::prefs::show_mm_bare(app, z.as_f64().unwrap_or(0.0) - a.as_f64().unwrap_or(0.0))).collect();
             rows.push(("Bounding box", format!("{} {unit}", d.join(" × "))));
+            let size: Vec<f64> = a.iter().zip(z).map(|(a, z)| z.as_f64().unwrap_or(0.0) - a.as_f64().unwrap_or(0.0)).collect();
+            if let [x, y, z] = size[..] {
+                stock = Some([x, y, z]);
+            }
         }
     }
     rows.push(("Faces / edges / vertices", format!("{} / {} / {}", total["faces"], total["edges"], total["vertices"])));
     let heading = crate::i18n::format("properties.title", &[("name", &title)]);
+    let mut cutlist = std::mem::take(&mut app.cutlist);
     let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+        // Cut-list prototype (#137): stock size and fabrication come first for a single body.
+        if let Some(dims) = stock.filter(|_| bodies.len() == 1) {
+            crate::cutlist_ux::properties(ui, &mut cutlist, dims);
+            ui_kit::section(ui, "props_physical", "Physical", true, |ui| {
+                for (label, value) in &rows {
+                    ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
+                }
+            });
+            return;
+        }
         for (label, value) in &rows {
             ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
         }
     });
+    app.cutlist = cutlist;
     if closed || action == ui_kit::Action::Cancel {
         app.menu.props = None;
     }
