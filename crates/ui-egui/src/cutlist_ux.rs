@@ -27,6 +27,7 @@ pub struct State {
     pub stock_picked: Option<usize>,
     /// Properties: the fabrication fields of the asked-about part.
     pub in_cut_list: Option<bool>,
+    pub bom_type: usize,
     pub material: usize,
     pub grain: usize,
 }
@@ -198,7 +199,7 @@ fn cut_list(s: &mut State, ctx: &egui::Context, design: &str) {
                 }
                 ui_kit::section_count(ui, "cutlist_checks", "Checks", true, Some(3), |ui| {
                     check(ui, Check::Ok, "All 8 bodies have a material and an exact stock box");
-                    check(ui, Check::Note, "No fasteners modelled: screws and glue won't appear in the shopping list");
+                    check(ui, Check::Note, "Left out by BOM type: purchased (casters, bolts) and reference (saw, planer) parts");
                     check(ui, Check::Live, "Sizes follow parameters: change bench_depth and this list updates");
                 });
             },
@@ -448,9 +449,16 @@ pub fn properties(ui: &mut Ui, s: &mut State, dims: [f64; 3]) {
         ui_kit::text(ui, "ƒx: use as a parameter, e.g. Left_end.stock.length", ui_kit::Text::Note("props_stock_fx"));
     });
     ui_kit::section(ui, "props_fabrication", "Fabrication", true, |ui| {
-        let mut on = s.in_cut_list.unwrap_or(true);
-        ui_kit::checkbox(ui, "Stock part (in cut list)", &mut on);
-        s.in_cut_list = Some(on);
+        ui_kit::choice_row(ui, "BOM type", "props_bom_type", &mut s.bom_type, &["Normal", "Purchased", "Reference", "Phantom", "Inseparable"]);
+        let typed_out = matches!(s.bom_type, 1 | 2);
+        let mut on = !typed_out && s.in_cut_list.unwrap_or(true);
+        ui.add_enabled_ui(!typed_out, |ui| ui_kit::checkbox(ui, "Cut from stock", &mut on));
+        if !typed_out {
+            s.in_cut_list = Some(on);
+        }
+        if typed_out {
+            ui_kit::text(ui, "Purchased and reference parts stay out of the cut list.", ui_kit::Text::Note("props_bom_note"));
+        }
         ui_kit::choice_row(ui, "Material", "props_material", &mut s.material, &["Plywood 18 mm", "Plywood 12 mm", "Oak 19 × 45"]);
         ui_kit::choice_row(ui, "Grain", "props_grain", &mut s.grain, &["Any (structural)", "Along length", "Along width"]);
         ui_kit::text(ui, "\"Along length\" costs this bench a 5th sheet.", ui_kit::Text::Note("props_grain_note"));
