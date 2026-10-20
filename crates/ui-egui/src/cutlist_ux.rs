@@ -16,20 +16,15 @@ pub struct State {
     pub cut_list: bool,
     pub layout: bool,
     pub stock: bool,
-    /// Cut List: the picked row, grouping, source and units (0 mm, 1 in).
+    /// Cut List: the picked row and units (0 mm, 1 in).
     pub picked: Option<usize>,
-    pub group_by: usize,
-    pub source: usize,
     pub units: usize,
-    /// Layout on Stock: grain locked on every part, offcuts first, the method.
+    /// Layout on Stock: grain locked on every part, the method and sheet size.
     pub lock_grain: bool,
-    pub offcuts_first: bool,
     pub method: usize,
     pub sheet_choice: usize,
-    /// Stock Library: the page, picked row and preset.
-    pub stock_page: usize,
+    /// Stock Library: the picked row.
     pub stock_picked: Option<usize>,
-    pub preset: usize,
     /// Properties: the fabrication fields of the asked-about part.
     pub in_cut_list: Option<bool>,
     pub material: usize,
@@ -159,17 +154,11 @@ fn cut_list(s: &mut State, ctx: &egui::Context, design: &str) {
             |ui| {
                 ui_kit::text(ui, &format!("{design} · {parts} parts in {} rows · 1 material", PARTS.len()), ui_kit::Text::Note("cutlist_summary"));
                 ui.horizontal(|ui| {
-                    for (label, id, value, options) in [
-                        ("Group by", "cutlist_group", &mut s.group_by, &["Material, then size", "Material", "Don't group"][..]),
-                        ("Parts from", "cutlist_source", &mut s.source, &["Bodies and components", "Components only", "Selection"][..]),
-                        ("Units", "cutlist_units", &mut s.units, &["mm", "in"][..]),
-                    ] {
-                        ui_kit::text(ui, label, ui_kit::Text::Inline);
-                        ui.allocate_ui(vec2(ui_kit::ContentWidth::dropdown(ui, options), ui_kit::row_height()), |ui| {
-                            ui_kit::dropdown(ui, id, value, options);
-                        });
-                        ui.add_space(t.space_12);
-                    }
+                    let options = ["mm", "in"];
+                    ui_kit::text(ui, "Units", ui_kit::Text::Inline);
+                    ui.allocate_ui(vec2(ui_kit::ContentWidth::dropdown(ui, &options), ui_kit::row_height()), |ui| {
+                        ui_kit::dropdown(ui, "cutlist_units", &mut s.units, &options);
+                    });
                 });
                 ui_kit::section_count(ui, "cutlist_plywood", "Plywood 18 mm", true, Some(parts as usize), |ui| {
                     let unit = if s.units == 1 { "in" } else { "mm" };
@@ -181,9 +170,7 @@ fn cut_list(s: &mut State, ctx: &egui::Context, design: &str) {
                         Column::new(&l, 0.8),
                         Column::new(&w, 0.8),
                         Column::new(&th, 0.7),
-                        Column::new("Kind", 0.5),
                         Column::new("Grain", 0.6),
-                        Column::new("Box", 0.5),
                     ];
                     ui_kit::table(ui, "cutlist", &columns, "No parts", |ui, table| {
                         for (i, p) in PARTS.iter().enumerate() {
@@ -198,9 +185,7 @@ fn cut_list(s: &mut State, ctx: &egui::Context, design: &str) {
                                 row.cell(|ui| ui_kit::text(ui, &len(s, p.length), ui_kit::Text::MonoCell));
                                 row.cell(|ui| ui_kit::text(ui, &len(s, p.width), ui_kit::Text::MonoCell));
                                 row.cell(|ui| ui_kit::text(ui, &len(s, p.thickness), ui_kit::Text::MonoCell));
-                                row.cell(|ui| ui_kit::text(ui, "Panel", ui_kit::Text::Cell));
                                 row.cell(|ui| ui_kit::text(ui, p.grain, ui_kit::Text::Cell));
-                                row.cell(|ui| ui_kit::text(ui, "Exact", ui_kit::Text::Cell));
                             });
                             if row.clicked() {
                                 s.picked = if picked { None } else { Some(i) };
@@ -294,10 +279,7 @@ fn layout_window(s: &mut State, ctx: &egui::Context) {
                                     "Locking grain on the ends and shelves needs 5 sheets instead of 4."
                                 };
                                 ui_kit::text(ui, note, ui_kit::Text::Note("layout_grain_note"));
-                                ui_kit::checkbox(ui, "Use offcuts from library first", &mut s.offcuts_first);
                             });
-                            ui.add_space(t.space_8);
-                            let _ = ui_kit::primary_button(ui, "Lay out");
                         }
                     });
                     ui.add_space(t.space_16);
@@ -309,14 +291,26 @@ fn layout_window(s: &mut State, ctx: &egui::Context) {
                         );
                         let width = ui.available_width();
                         let cell = (width - t.space_16) / 2.0;
-                        for (row, pair) in sheets.chunks(2).enumerate() {
+                        // Identical sheets in a row are drawn once, with their count.
+                        let mut groups: Vec<(usize, usize, &[Placed])> = Vec::new();
+                        for (i, sheet) in sheets.iter().enumerate() {
+                            match groups.last_mut() {
+                                Some((_, count, last)) if *last == *sheet => *count += 1,
+                                _ => groups.push((i + 1, 1, sheet)),
+                            }
+                        }
+                        for pair in groups.chunks(2) {
                             ui.horizontal(|ui| {
-                                for (col, sheet) in pair.iter().enumerate() {
-                                    let n = row * 2 + col + 1;
+                                for (first, count, sheet) in pair {
                                     let yield_ = sheet.iter().map(part_area).sum::<f64>() / sheet_area * 100.0;
+                                    let title = if *count > 1 {
+                                        format!("Sheets {first}–{} · × {count} · {yield_:.0}% each", first + count - 1)
+                                    } else {
+                                        format!("Sheet {first} · {yield_:.0}%")
+                                    };
                                     ui.vertical(|ui| {
                                         ui.set_width(cell);
-                                        ui_kit::text(ui, &format!("Sheet {n} · {yield_:.0}%"), ui_kit::Text::Inline);
+                                        ui_kit::text(ui, &title, ui_kit::Text::Inline);
                                         draw_sheet(ui, cell, sheet);
                                     });
                                 }
@@ -334,9 +328,8 @@ fn layout_window(s: &mut State, ctx: &egui::Context) {
                             };
                             ui_kit::text(ui, why, ui_kit::Text::Note("layout_why"));
                         });
-                        ui_kit::section(ui, "layout_offcuts", "Offcuts", false, |ui| {
+                        ui_kit::section(ui, "layout_offcuts", "Offcuts", true, |ui| {
                             ui_kit::text(ui, "2 × 1829 × 434 · 2 × 586 × 1199, plus strips under the rear brace", ui_kit::Text::Inline);
-                            let _ = ui_kit::button(ui, "Save offcuts to the stock library", ui_kit::Button::Normal);
                         });
                     });
                 });
@@ -397,37 +390,18 @@ fn draw_sheet(ui: &mut Ui, width: f32, sheet: &[Placed]) {
 }
 
 fn stock_window(s: &mut State, ctx: &egui::Context) {
-    let pages = [
-        ui_kit::WindowPage { icon: "library", label: "All (9)", handle: "stock:all", scroll: true, draw: |ui, s| stock_page(ui, s, "") },
-        ui_kit::WindowPage { icon: "sheet", label: "Sheet goods (4)", handle: "stock:sheet", scroll: true, draw: |ui, s| stock_page(ui, s, "Sheet") },
-        ui_kit::WindowPage { icon: "extrude", label: "Boards (3)", handle: "stock:board", scroll: true, draw: |ui, s| stock_page(ui, s, "Board") },
-        ui_kit::WindowPage { icon: "pipe", label: "Lengths (2)", handle: "stock:length", scroll: true, draw: |ui, s| stock_page(ui, s, "Length") },
-        ui_kit::WindowPage { icon: "cut", label: "Offcuts (0)", handle: "stock:offcut", scroll: true, draw: |ui, s| stock_page(ui, s, "Offcut") },
-    ];
-    let mut page = s.stock_page;
-    let mut preset = s.preset;
     let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_cutlist_stock"), "library", "Stock Library")
         .resizable()
-        .cards(3.6)
+        .cards(3.2)
         .actions("", "Close", None)
-        .show_pages(ctx, &mut page, &pages, s, |ui| {
-            let presets = ["Preset: Metric (EU)", "Preset: Imperial (US)"];
-            ui.allocate_ui(vec2(ui_kit::ContentWidth::dropdown(ui, &presets), ui_kit::row_height()), |ui| {
-                ui_kit::dropdown(ui, "stock_preset", &mut preset, &presets);
-            });
-            let _ = ui_kit::button(ui, "Import JSON…", ui_kit::Button::Normal);
-            let _ = ui_kit::button(ui, "Export JSON…", ui_kit::Button::Normal);
-        });
-    s.stock_page = page;
-    s.preset = preset;
+        .show(ctx, true, |ui| stock_table(ui, s));
     if closed || action == ui_kit::Action::Cancel {
         s.stock = false;
     }
 }
 
-fn stock_page(ui: &mut Ui, s: &mut State, kind: &str) {
+fn stock_table(ui: &mut Ui, s: &mut State) {
     ui_kit::text(ui, "What you can buy. Shared by every design on this computer.", ui_kit::Text::Note("stock_intro"));
-    let rows: Vec<(usize, &Stock)> = STOCK.iter().enumerate().filter(|(_, r)| kind.is_empty() || r.1 == kind).collect();
     let columns = [
         Column::new("Name", 1.6).flex(),
         Column::new("Kind", 0.5),
@@ -436,10 +410,9 @@ fn stock_page(ui: &mut Ui, s: &mut State, kind: &str) {
         Column::new("Lengths", 1.0),
         Column::new("Price", 0.6),
     ];
-    let empty = if kind == "Offcut" { "No offcuts saved yet. Layout on Stock can save them here." } else { "No stock" };
-    ui_kit::table(ui, "stock", &columns, empty, |ui, table| {
-        for (i, r) in &rows {
-            let picked = s.stock_picked == Some(*i);
+    ui_kit::table(ui, "stock", &columns, "No stock", |ui, table| {
+        for (i, r) in STOCK.iter().enumerate() {
+            let picked = s.stock_picked == Some(i);
             let row = table.row(ui, r.0, picked, |row| {
                 row.cell(|ui| ui_kit::text(ui, r.0, ui_kit::Text::NameCell(picked)));
                 for v in [r.1, r.2, r.3, r.4, r.5] {
@@ -447,23 +420,14 @@ fn stock_page(ui: &mut Ui, s: &mut State, kind: &str) {
                 }
             });
             if row.clicked() {
-                s.stock_picked = Some(*i);
+                s.stock_picked = if picked { None } else { Some(i) };
             }
         }
     });
     let _ = ui_kit::button(ui, "+ Add stock", ui_kit::Button::Normal);
-    if let Some(r) = s.stock_picked.and_then(|i| STOCK.get(i)).filter(|r| kind.is_empty() || r.1 == kind) {
+    if let Some(r) = s.stock_picked.and_then(|i| STOCK.get(i)) {
         ui_kit::section(ui, "stock_detail", r.0, true, |ui| {
-            for (label, value) in [
-                ("Kind", r.1),
-                ("Thickness (actual)", r.2),
-                ("Size (actual)", r.3),
-                ("Lengths", if r.4.is_empty() { "—" } else { r.4 }),
-                ("Grain", "Along length"),
-                ("End trim", "25 mm"),
-                ("Keep offcuts over", "300 mm"),
-                ("Price", r.5),
-            ] {
+            for (label, value) in [("Size (actual)", r.3), ("Lengths", if r.4.is_empty() { "—" } else { r.4 }), ("Grain", "Along length"), ("Price", r.5)] {
                 ui_kit::row(ui, label, |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
             }
             ui_kit::text(ui, "Cut-list rows of this material and thickness use this stock when laid out.", ui_kit::Text::Note("stock_match"));
@@ -481,8 +445,6 @@ pub fn properties(ui: &mut Ui, s: &mut State, dims: [f64; 3]) {
         for (label, v) in ["Length", "Width", "Thickness"].into_iter().zip(d) {
             ui_kit::row(ui, label, |ui| ui_kit::text(ui, &format!("{v:.1} mm   ƒx"), ui_kit::Text::Cell));
         }
-        ui_kit::row(ui, "Kind", |ui| ui_kit::text(ui, if d[2] <= 25.0 { "Panel" } else { "Block" }, ui_kit::Text::Cell));
-        ui_kit::row(ui, "Box", |ui| ui_kit::text(ui, "Exact", ui_kit::Text::Cell));
         ui_kit::text(ui, "ƒx: use as a parameter, e.g. Left_end.stock.length", ui_kit::Text::Note("props_stock_fx"));
     });
     ui_kit::section(ui, "props_fabrication", "Fabrication", true, |ui| {
@@ -491,7 +453,6 @@ pub fn properties(ui: &mut Ui, s: &mut State, dims: [f64; 3]) {
         s.in_cut_list = Some(on);
         ui_kit::choice_row(ui, "Material", "props_material", &mut s.material, &["Plywood 18 mm", "Plywood 12 mm", "Oak 19 × 45"]);
         ui_kit::choice_row(ui, "Grain", "props_grain", &mut s.grain, &["Any (structural)", "Along length", "Along width"]);
-        ui_kit::row(ui, "Size override", |ui| ui_kit::text(ui, "None", ui_kit::Text::Cell));
         ui_kit::text(ui, "\"Along length\" costs this bench a 5th sheet.", ui_kit::Text::Note("props_grain_note"));
     });
 }
