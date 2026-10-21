@@ -166,8 +166,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let mut cutlist = std::mem::take(&mut app.cutlist);
     let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         // Cut-list prototype (#137): stock size and fabrication come first for a single body.
-        if let Some(dims) = stock.filter(|_| bodies.len() == 1) {
-            crate::cutlist_ux::properties(ui, &mut cutlist, dims);
+        let component = v.get("name").is_some();
+        if component || bodies.len() == 1 {
+            crate::cutlist_ux::properties(ui, &mut cutlist, stock.filter(|_| bodies.len() == 1), component);
             ui_kit::section(ui, "props_physical", "Physical", true, |ui| {
                 for (label, value) in &rows {
                     ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));

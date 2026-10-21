@@ -28,6 +28,9 @@ pub struct State {
     /// Properties: the fabrication fields of the asked-about part.
     pub in_cut_list: Option<bool>,
     pub bom_type: usize,
+    /// Cut List: the left-out parts shown; Layout on Stock asked for the bill of materials.
+    pub left_out_open: bool,
+    pub open_bom: bool,
     pub material: usize,
     pub grain: usize,
 }
@@ -48,6 +51,16 @@ const PARTS: &[Part] = &[
     Part { name: "End / center support", members: "left, center, right", qty: 3, length: 878.4, width: 591.6, thickness: 18.0, grain: "Any" },
     Part { name: "Rear bracing panel", members: "", qty: 1, length: 1676.4, width: 778.4, thickness: 18.0, grain: "Any" },
     Part { name: "Shelf", members: "left, right", qty: 2, length: 811.2, width: 591.6, thickness: 18.0, grain: "Any" },
+];
+
+/// Parts the cut list leaves out by their BOM type (#3874), from the full bench design.
+const LEFT_OUT: &[(&str, &str)] = &[
+    ("Caster × 4", "Purchased"),
+    ("Bolt M8 × 16", "Purchased"),
+    ("Drawer track × 2", "Purchased"),
+    ("Table saw", "Reference"),
+    ("Planer", "Reference"),
+    ("Vacuum clearance", "Reference"),
 ];
 
 /// A sheet 2440 × 1220 (4 × 8 ft), as laid out.
@@ -137,7 +150,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if s.stock {
         stock_window(&mut s, ctx);
     }
+    let open_bom = std::mem::take(&mut s.open_bom);
     app.cutlist = s;
+    if open_bom {
+        app.start("assembly.bom");
+    }
 }
 
 fn cut_list(s: &mut State, ctx: &egui::Context, design: &str) {
@@ -199,7 +216,19 @@ fn cut_list(s: &mut State, ctx: &egui::Context, design: &str) {
                 }
                 ui_kit::section_count(ui, "cutlist_checks", "Checks", true, Some(3), |ui| {
                     check(ui, Check::Ok, "All 8 bodies have a material and an exact stock box");
-                    check(ui, Check::Note, "Left out by BOM type: purchased (casters, bolts) and reference (saw, planer) parts");
+                    ui.horizontal(|ui| {
+                        check(ui, Check::Note, "Left out by BOM type: 22 purchased, 3 reference");
+                        let label = if s.left_out_open { "Hide" } else { "Show" };
+                        if ui_kit::button(ui, label, ui_kit::Button::Small).clicked() {
+                            s.left_out_open = !s.left_out_open;
+                        }
+                    });
+                    if s.left_out_open {
+                        for (what, why) in LEFT_OUT {
+                            ui_kit::row(ui, what, |ui| ui_kit::text(ui, why, ui_kit::Text::Cell));
+                        }
+                        ui_kit::text(ui, "Wrong? Change the part's BOM type in Properties.", ui_kit::Text::Note("cutlist_left_out_note"));
+                    }
                     check(ui, Check::Live, "Sizes follow parameters: change bench_depth and this list updates");
                 });
             },
@@ -328,6 +357,11 @@ fn layout_window(s: &mut State, ctx: &egui::Context) {
                                 "Why 4: each 762 mm top layer needs its own sheet; two don't fit across 1220."
                             };
                             ui_kit::text(ui, why, ui_kit::Text::Note("layout_why"));
+                            ui_kit::row(ui, "Hardware", |ui| {
+                                if ui_kit::button(ui, "Bill of Materials…", ui_kit::Button::Small).clicked() {
+                                    s.open_bom = true;
+                                }
+                            });
                         });
                         ui_kit::section(ui, "layout_offcuts", "Offcuts", true, |ui| {
                             ui_kit::text(ui, "2 × 1829 × 434 · 2 × 586 × 1199, plus strips under the rear brace", ui_kit::Text::Inline);
@@ -439,25 +473,31 @@ fn stock_table(ui: &mut Ui, s: &mut State) {
 /// The Properties card's Stock size and Fabrication sections for a body whose world box is
 /// `dims` (mm). The stock box here is the world box sorted longest first; the real one follows
 /// the part.
-pub fn properties(ui: &mut Ui, s: &mut State, dims: [f64; 3]) {
-    let mut d = dims;
-    d.sort_by(|a, b| b.total_cmp(a));
-    ui_kit::section(ui, "props_stock", "Stock size", true, |ui| {
-        for (label, v) in ["Length", "Width", "Thickness"].into_iter().zip(d) {
-            ui_kit::row(ui, label, |ui| ui_kit::text(ui, &format!("{v:.1} mm   ƒx"), ui_kit::Text::Cell));
-        }
-        ui_kit::text(ui, "ƒx: use as a parameter, e.g. Left_end.stock.length", ui_kit::Text::Note("props_stock_fx"));
-    });
+pub fn properties(ui: &mut Ui, s: &mut State, dims: Option<[f64; 3]>, component: bool) {
+    if let Some(mut d) = dims {
+        d.sort_by(|a, b| b.total_cmp(a));
+        ui_kit::section(ui, "props_stock", "Stock size", true, |ui| {
+            for (label, v) in ["Length", "Width", "Thickness"].into_iter().zip(d) {
+                ui_kit::row(ui, label, |ui| ui_kit::text(ui, &format!("{v:.1} mm   ƒx"), ui_kit::Text::Cell));
+            }
+            ui_kit::text(ui, "ƒx: use as a parameter, e.g. Left_end.stock.length", ui_kit::Text::Note("props_stock_fx"));
+        });
+    }
     ui_kit::section(ui, "props_fabrication", "Fabrication", true, |ui| {
-        ui_kit::choice_row(ui, "BOM type", "props_bom_type", &mut s.bom_type, &["Normal", "Purchased", "Reference", "Phantom", "Inseparable"]);
-        let typed_out = matches!(s.bom_type, 1 | 2);
-        let mut on = !typed_out && s.in_cut_list.unwrap_or(true);
-        ui.add_enabled_ui(!typed_out, |ui| ui_kit::checkbox(ui, "Cut from stock", &mut on));
-        if !typed_out {
+        // A component carries its BOM type (#3874); a loose body has only the cut-from-stock box.
+        if component {
+            ui_kit::choice_row(ui, "BOM type", "props_bom_type", &mut s.bom_type, &["Normal", "Purchased", "Reference", "Phantom", "Inseparable"]);
+            let note = match s.bom_type {
+                1 | 2 => "Purchased and reference parts stay out of the cut list.",
+                3 => "Phantom: its parts count as if they sat in the parent.",
+                4 => "Inseparable: its parts are still listed, since each is cut before glue-up.",
+                _ => "Its bodies are cut from stock.",
+            };
+            ui_kit::text(ui, note, ui_kit::Text::Note("props_bom_note"));
+        } else {
+            let mut on = s.in_cut_list.unwrap_or(true);
+            ui_kit::checkbox(ui, "Cut from stock", &mut on);
             s.in_cut_list = Some(on);
-        }
-        if typed_out {
-            ui_kit::text(ui, "Purchased and reference parts stay out of the cut list.", ui_kit::Text::Note("props_bom_note"));
         }
         ui_kit::choice_row(ui, "Material", "props_material", &mut s.material, &["Plywood 18 mm", "Plywood 12 mm", "Oak 19 × 45"]);
         ui_kit::choice_row(ui, "Grain", "props_grain", &mut s.grain, &["Any (structural)", "Along length", "Along width"]);
